@@ -109,3 +109,4 @@ venv.bak/
 Components/gdrive/key.pem
 packaged-template.yaml
 newdeal.py
+.DS_Store
