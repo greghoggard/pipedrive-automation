@@ -320,8 +320,6 @@ Resources:
                 - added.deal
               stage:
                 - lead_in
-              pipeline:
-                - '1'
         GdriveTopic:
           Type: SNS
           Properties:
@@ -393,8 +391,6 @@ Resources:
               stage:
                 - lead_validation
                 - deal_closure
-              pipeline:
-                - '1'
 
   # Function for copying the necessary files during Solution Development phase
   GdriveCopyFileSolutionDevelopmentFunction:

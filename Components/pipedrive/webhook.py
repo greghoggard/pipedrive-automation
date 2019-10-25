@@ -6,6 +6,7 @@ import sys
 import boto3
 from botocore.exceptions import ClientError
 import requests
+import pipedrive_helpers as pipedrive
 
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.WARNING)
@@ -47,6 +48,18 @@ class SnsPublishError(Exception):
 
 class RegressiveStageUpdateError(Exception):
     '''Error class to handle when a pipedrive stage is lower than its previous'''
+
+
+def build_sns_message(deal):
+    '''Construct the base sns message'''
+    sns_message = {
+        'CustomerName': deal['current']['org_name'],
+        'ProjectName': deal['current']['title'],
+        'ShortName': deal['current']['b3ac74b4fdba3bb5fe7277f0a75d17da65ee759b'],
+        'EventType': deal['event'],
+        'DealId': deal['current']['id']
+    }
+    return sns_message
 
 
 def build_message_attributes(deal_event, stage, current):
@@ -97,14 +110,7 @@ def publish_sns_message(sns_topic_arn, message, attributes):
 def new_deal(deal, deal_event, stage, sns_topic_arn):
     '''Workflow for new deal'''
     try:
-        sns_message = {
-            'CustomerName': deal['current']['org_name'],
-            'ProjectName': deal['current']['title'],
-            'ShortName': deal['current']['b3ac74b4fdba3bb5fe7277f0a75d17da65ee759b'],
-            'EventType': deal_event,
-            'DealId': deal['current']['id']
-        }
-
+        sns_message = build_sns_message(deal)
         message_attributes = build_message_attributes(deal_event, stage, deal['current'])
 
         # Publish a message to Pipedrive Topic
@@ -152,28 +158,20 @@ def updated_deal(deal, deal_event, stage):
         # Load pipedrive credentials
         token, domain = get_pipedrive_credentials()
         # Grab all the deal fields and their information
-        deal_fields = get_deal_fields(domain, token)
+        deal_fields = pipedrive.get_deal_fields(domain, token)
         # Build dict describing relationship between key and options
         map_items = ['Territory', 'Solution Program', 'Deal Type']
 
-        field_map = build_field_map(deal_fields, map_items)
+        field_map = pipedrive.build_field_map(deal_fields, map_items)
         # updates = build_update_message(current, diff, field_map)
 
         # Construct SNS message
-        sns_message = {
-            'CustomerName': deal['current']['org_name'],
-            'ProjectName': deal['current']['title'],
-            'ShortName': deal['current']['b3ac74b4fdba3bb5fe7277f0a75d17da65ee759b'],
-            'EventType': deal_event,
-            'Territory': get_deal_field(field_map, 'Territory', current),
-            'DealType': get_deal_field(field_map, 'DealType', current),
-            'SolutionProgram': get_deal_field(field_map, 'SolutionProgram', current),
-            'SOWLink': get_deal_field(field_map, 'SOWLink', current),
-            'GDriveLink': get_deal_field(field_map, 'GDriveLink', current),
-            'APNPortalOppLink': get_deal_field(field_map, 'APNPortalOppLink', current),
-            'DealId': deal['current']['id'],
-            'Updates': build_update_message(current, diff, field_map)
-        }
+        sns_message = build_sns_message(deal)
+        fields = ['Territory', 'DealType', 'SolutionProgram', 'SOWLink', 'GDriveLink', 'APNPortalOppLink']
+        for field in fields:
+            sns_message[field] = pipedrive.get_deal_field(field_map, field, current)
+
+        sns_message['Updates'] = build_update_message(current, diff, field_map)
 
         message_attributes = build_message_attributes('updated.deal', stage, current)
 
@@ -252,44 +250,6 @@ def get_deal_db(deal):
         LOGGER.exception(errc)
         exc_info = sys.exc_info()
         raise Exception(errc).with_traceback(exc_info[2])
-
-
-def get_deal_fields(domain, token):
-    url = 'https://{}.pipedrive.com/v1/dealFields:(key,name,options)?start=0&api_token={}'.format(domain, token)
-
-    try:
-        resp = requests.get(url)
-        resp.raise_for_status()
-        fields = resp.json()['data']
-    except Exception as error:
-        raise Exception(error)
-
-    return fields
-
-
-def get_deal_field(field_map, field_name, current):
-    gdrive_fields = ['GDriveLink', 'SOWLink', 'APNPortalOppLink']
-    for key in field_map.keys():
-        if field_map[key]['name'] == field_name:
-            if field_map[key]['name'] in gdrive_fields:
-                return current[key]
-            return field_map[key][current[key]]
-
-
-def build_field_map(fields, map_items):
-    field_map = {}
-    gdrive_fields = ['GDrive Link', 'SOW Link', 'APN Portal Opp Link']
-    for field in fields:
-        for item in map_items:
-            if item in field['name']:
-                field_map.update({field['key'] : {'name': field['name'].replace(' ', '')}})
-                for index in range(len(field['options'])):
-                    field_map[field['key']].update({'{}'.format(field['options'][index]['id']) : field['options'][index]['label']})
-        for item in gdrive_fields:
-            if item in field['name']:
-                field_map.update({field['key'] : {'name': field['name'].replace(' ', '')}})
-
-    return field_map
 
 
 def build_update_message(current, diff, field_map):
