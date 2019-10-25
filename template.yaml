@@ -1,0 +1,765 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: pipedrive-automation microservice
+
+Globals:
+  Function:
+    Timeout: 60
+
+Parameters:
+  Namespace:
+    Type: String
+    Default: pipedrive-automation
+  EnvType:
+    Type: String
+    AllowedValues:
+      - prod
+      - labs
+    Default: labs
+  GdriveCustomerFolderId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: The Folder ID of the root Customers folder
+    Default: /gdrive/labs/customers_root_folder_id
+  DocTemplateFolderId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: The Folder ID of the Document Templates folder
+    Default: /gdrive/labs/doc_template_root_folder_id
+  SolutionArchitectEmailEast:
+    Type: String
+    Default: 'greg.hoggard@stelligent.com'
+  SolutionArchitectEmailWest:
+    Type: String
+    Default: 'jessica.giordano@stelligent.com'
+  APNEmail:
+    Type: String
+    Default: 'jessica.giordano@stelligent.com'
+
+
+Conditions:
+  CreateProdResources: !Equals [ !Ref EnvType, prod ]
+
+Resources:
+
+  # Topic that all PipeDrive Functions publishes to
+  PipeDriveTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "pipedrive-topic"
+
+  # Topic that all Gdrive Functions publishes to
+  GdriveTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "gdrive-topic"
+
+  # Topic that all Slack Functions publishes to
+  SlackTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "slack-topic"
+
+  # Pipedrive Dead Letter Queue
+  PipedriveQueueDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: pipedrive-queue-dlq
+
+  # Pipedrive Deals Dynamodb table
+  PipedriveDealsDDBTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      KeySchema:
+        -
+          AttributeName: 'customer'
+          KeyType: 'HASH'
+        -
+          AttributeName: 'project'
+          KeyType: 'RANGE'
+      AttributeDefinitions:
+        -
+          AttributeName: 'customer'
+          AttributeType: 'S'
+        -
+          AttributeName: 'project'
+          AttributeType: 'S'
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+      TableName: 'pipedrive-deals'
+
+  # Function for ingesting PipeDrive API calls
+  PipeDriveWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-PipeDriveWebhook
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt PipedriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - sns:Publish
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+               - dynamodb:PutItem
+               - dynamodb:UpdateItem
+               - dynamodb:DeleteItem
+             Resource:
+               - !GetAtt PipedriveDealsDDBTable.Arn
+      CodeUri: Components/pipedrive/
+      Handler: webhook.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          PIPEDRIVE_SNS_TOPIC_ARN: !Ref PipeDriveTopic
+          API_TOKEN_PATH: !Sub '/pipedrive/${EnvType}/pipedrive_api_token'
+      Tracing: Active
+      Events:
+        PipeDriveWebhook:
+          Type: Api
+          Properties:
+            Path: /pipedrive
+            Method: POST
+
+  # Function for updating Pipedrive deal with Gdrive Folder links
+  PipeDriveDealUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-PipeDriveDealUpdate
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt PipedriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - sns:Publish
+             Resource: '*'
+      CodeUri: Components/pipedrive/
+      Handler: deal_update.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          PIPEDRIVE_SNS_TOPIC_ARN: !Ref PipeDriveTopic
+          API_TOKEN_PATH: !Sub '/pipedrive/${EnvType}/pipedrive_api_token'
+      Tracing: Active
+      Events:
+        GdriveLinks:
+          Type: SNS
+          Properties:
+            Topic: !Ref GdriveTopic
+            FilterPolicy:
+              component:
+                - gdrive
+              action:
+                - create_folders
+                - copy_files
+              stage:
+                - lead_in
+                - proposal_development
+                - solution_development
+
+  # GDrive Dead Letter Queue
+  GdriveQueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: gdrive-queue-dlq
+
+  # Gdrive Doc Template Dynamodb table
+  GdriveDocTemplatesDDBTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      KeySchema:
+        -
+          AttributeName: 'stage'
+          KeyType: 'HASH'
+        -
+          AttributeName: 'tag'
+          KeyType: 'RANGE'
+      AttributeDefinitions:
+        -
+          AttributeName: 'stage'
+          AttributeType: 'S'
+        -
+          AttributeName: 'tag'
+          AttributeType: 'S'
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+      TableName: 'gdrive-doc-templates'
+
+  # Gdrive Customers Dynamodb table
+  GdriveCustomersDDBTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      KeySchema:
+        -
+          AttributeName: 'customer'
+          KeyType: 'HASH'
+        -
+          AttributeName: 'project'
+          KeyType: 'RANGE'
+      AttributeDefinitions:
+        -
+          AttributeName: 'customer'
+          AttributeType: 'S'
+        -
+          AttributeName: 'project'
+          AttributeType: 'S'
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+      TableName: 'gdrive-customers'
+
+  # Function for periodically updating the gdrive-doc-templates Dynamodb table
+  GdriveUpdateDocTemplatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-GdriveUpdateDocTemplates
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt GdriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:PutItem
+               - dynamodb:UpdateItem
+               - dynamodb:DeleteItem
+             Resource: !GetAtt GdriveDocTemplatesDDBTable.Arn
+      CodeUri: Components/gdrive/
+      Handler: update_doc_templates.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          GDRIVE_SNS_TOPIC_ARN: !Ref GdriveTopic
+          GDRIVE_DOC_TEMPLATE_FOLDER_ID: !Ref DocTemplateFolderId
+      Tracing: Active
+      Events:
+        HourlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Name: doc-templates-hourly
+            Description: Hourly trigger to update DynamoDB with latest Doc Template information
+            Enabled: True
+
+  # Function for creating the folder structure in GDrive
+  GdriveCreateFoldersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-GdriveCreateFolders
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt GdriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:PutItem
+               - dynamodb:UpdateItem
+               - dynamodb:DeleteItem
+             Resource: !GetAtt GdriveCustomersDDBTable.Arn
+      CodeUri: Components/gdrive/
+      Handler: create_folders.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          GDRIVE_SNS_TOPIC_ARN: !Ref GdriveTopic
+          GDRIVE_PARENT_FOLDER_ID: !Ref GdriveCustomerFolderId
+      Tracing: Active
+      Events:
+        PipedriveTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - added.deal
+              stage:
+                - lead_in
+              pipeline:
+                - '1'
+        GdriveTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref GdriveTopic
+            FilterPolicy:
+              component:
+                - gdrive
+              action:
+                - folder_missing
+              stage:
+                - error
+
+  # Function for copying document templates into gdrive folders
+  GdriveCopyFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-GdriveCopyFiles
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt GdriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+             Resource:
+               - !GetAtt GdriveDocTemplatesDDBTable.Arn
+               - !GetAtt GdriveCustomersDDBTable.Arn
+      CodeUri: Components/gdrive/
+      Handler: copy_files.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          GDRIVE_SNS_TOPIC_ARN: !Ref GdriveTopic
+          GDRIVE_PARENT_FOLDER_ID: !Ref GdriveCustomerFolderId
+      Tracing: Active
+      Events:
+        GdriveTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref GdriveTopic
+            FilterPolicy:
+              component:
+                - gdrive
+              action:
+                - create_folders
+              stage:
+                - lead_in
+        PipedriveTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - updated.deal
+              stage:
+                - lead_validation
+                - deal_closure
+              pipeline:
+                - '1'
+
+  # Function for copying the necessary files during Solution Development phase
+  GdriveCopyFileSolutionDevelopmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-GdriveCopyFileSolutionDevelopment
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt GdriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+             Resource:
+               - !GetAtt GdriveDocTemplatesDDBTable.Arn
+               - !GetAtt GdriveCustomersDDBTable.Arn
+      CodeUri: Components/gdrive/
+      Handler: copy_file_solution_development.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          GDRIVE_SNS_TOPIC_ARN: !Ref GdriveTopic
+          GDRIVE_PARENT_FOLDER_ID: !Ref GdriveCustomerFolderId
+          GDRIVE_DOC_TEMPLATE_FOLDER_ID: !Ref DocTemplateFolderId
+      Tracing: Active
+      Events:
+        SnsTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - updated.deal
+              stage:
+                - solution_development
+
+  # Function for copying the necessary files during Proposal Development phase
+  GdriveCopyFileProposalDevelopmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-GdriveCopyFileProposalDevelopment
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt GdriveQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+             Resource:
+               - !GetAtt GdriveDocTemplatesDDBTable.Arn
+               - !GetAtt GdriveCustomersDDBTable.Arn
+      CodeUri: Components/gdrive/
+      Handler: copy_file_proposal_development.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          GDRIVE_SNS_TOPIC_ARN: !Ref GdriveTopic
+          GDRIVE_PARENT_FOLDER_ID: !Ref GdriveCustomerFolderId
+          GDRIVE_DOC_TEMPLATE_FOLDER_ID: !Ref DocTemplateFolderId
+          RESOURCE_REQUEST_LINK: !Sub '/gdrive/${EnvType}/resource_request_path'
+      Tracing: Active
+      Events:
+        SnsTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - updated.deal
+              stage:
+                - proposal_development
+
+  # Slac Dead Letter Queue
+  SlackQueueDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: slack-queue-dlq
+
+  # Slack Customers Dynamodb table
+  SlackCustomersDDBTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      KeySchema:
+        -
+          AttributeName: 'customer'
+          KeyType: 'HASH'
+        -
+          AttributeName: 'project'
+          KeyType: 'RANGE'
+      AttributeDefinitions:
+        -
+          AttributeName: 'customer'
+          AttributeType: 'S'
+        -
+          AttributeName: 'project'
+          AttributeType: 'S'
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+      TableName: 'slack-customers'
+
+  # Function for creating slack channel for new customers
+  SlackCreateChannelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-SlackCreateChannel
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SlackQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+               - dynamodb:PutItem
+               - dynamodb:UpdateItem
+               - dynamodb:DeleteItem
+             Resource:
+               - !GetAtt SlackCustomersDDBTable.Arn
+      CodeUri: Components/slack/
+      Handler: create_channel.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          SLACK_SNS_TOPIC_ARN: !Ref SlackTopic
+          API_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_api_token'
+      Tracing: Active
+      Events:
+        SnsTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - added.deal
+              stage:
+                - lead_in
+
+  # Function for sending slack messages to Solution Architects
+  SlackSendMessageToSAFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-SlackSendMessageToSA
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SlackQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+      CodeUri: Components/slack/
+      Handler: send_message_to_sa.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          SLACK_SNS_TOPIC_ARN: !Ref SlackTopic
+          BOT_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_bot_token'
+          SA_EMAIL_WEST: !Ref SolutionArchitectEmailWest
+          SA_EMAIL_EAST: !Ref SolutionArchitectEmailEast
+      Tracing: Active
+      Events:
+        GdriveCopyFiles:
+          Type: SNS
+          Properties:
+            Topic: !Ref GdriveTopic
+            FilterPolicy:
+              component:
+                - gdrive
+              action:
+                - copy_files
+              stage:
+                - lead_validation
+                - proposal_development
+
+  # Function for sending slack notification to #sales-engagement-review1
+  SlackSendMessageEngagementReviewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-SlackSendMessageEngagementReview
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SlackQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+      CodeUri: Components/slack/
+      Handler: send_message_engagement_review.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          SLACK_SNS_TOPIC_ARN: !Ref SlackTopic
+          API_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_api_token'
+          BOT_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_bot_token'
+      Tracing: Active
+      Events:
+        PipedriveWebhook:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - updated.deal
+              stage:
+                - negotiation
+
+  # Function for sending slack notification to Jessica regarding APN Opportunity
+  SlackSendMessageAPNFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-SlackSendMessageAPN
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SlackQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+      CodeUri: Components/slack/
+      Handler: send_message_apn.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          SLACK_SNS_TOPIC_ARN: !Ref SlackTopic
+          API_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_api_token'
+          BOT_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_bot_token'
+          APN_EMAIL: !Ref APNEmail
+      Tracing: Active
+      Events:
+        PipedriveWebhook:
+          Type: SNS
+          Properties:
+            Topic: !Ref PipeDriveTopic
+            FilterPolicy:
+              component:
+                - pipedrive
+              action:
+                - updated.deal
+              stage:
+                - negotiation
+
+  # Function for sending slack notification to Jessica regarding APN Opportunity
+  SlackDealWonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Namespace}-SlackDealWon
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SlackQueueDLQ.Arn
+      Policies:
+       - Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ssm:GetParameter
+               - sns:*
+               - xray:*
+             Resource: '*'
+           - Effect: Allow
+             Action:
+               - dynamodb:Describe*
+               - dynamodb:List*
+               - dynamodb:GetItem
+               - dynamodb:Query
+               - dynamodb:PutItem
+               - dynamodb:UpdateItem
+               - dynamodb:DeleteItem
+             Resource:
+               - !GetAtt SlackCustomersDDBTable.Arn
+      CodeUri: Components/slack/
+      Handler: deal_won.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Environment:
+        Variables:
+          SLACK_SNS_TOPIC_ARN: !Ref SlackTopic
+          BOT_TOKEN_PATH: !Sub '/slack/${EnvType}/slack_bot_token'
+      Tracing: Active
+      Events:
+        GdriveWebhook:
+          Type: SNS
+          Properties:
+            Topic: !Ref GdriveTopic
+            FilterPolicy:
+              component:
+                - gdrive
+              stage:
+                - deal_closure
+
+Outputs:
+  PipeDriveTopicArn:
+    Value: !Ref PipeDriveTopic
+    Description: SNS Topic for PipeDrive events
+
+  PipeDriveWebhookFunction:
+    Description: "PipeDrive Webhook Lambda Function ARN"
+    Value: !GetAtt PipeDriveWebhookFunction.Arn
+
+  PipeDriveDealUpdateFunction:
+    Description: "PipeDrive Deal Update Lambda Function ARN"
+    Value: !GetAtt PipeDriveDealUpdateFunction.Arn
+
+  SlackTopicArn:
+    Value: !Ref SlackTopic
+    Description: SNS Topic for Slack events

@@ -1,0 +1,12 @@
+moto
+mypy
+pylint
+pytest
+pytest-pylint
+requests
+boto3
+pydrive
+requests
+pyopenssl
+slackclient
+fiscalyear

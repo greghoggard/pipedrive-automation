@@ -1,0 +1,313 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy microservices that automate pipedrive functions
+
+Parameters:
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name
+    Default: pipedrive-automation
+
+  GitHubRepoOwner:
+    Type: String
+    Description: The user or organization that owns the repository
+    Default: stelligent
+
+  GitHubBranch:
+    Type: String
+    Description: GitHub branch to use
+    Default: master
+
+  GitHubToken:
+    Type: String
+    Description: GitHub OAuth Access Token
+    NoEcho: true
+
+  StackName:
+    Type: String
+    Description: Stack name for stack containing Lambda resources
+    Default: pipedrive-automation
+
+  ArtifactStoreBucketName:
+    Type: String
+    Description: Pipeline artifact bucket name
+    Default: pipedrive-automation-artifacts
+
+  DeployCodeBuildProjectName:
+    Type: String
+    Description: Name for "Deploy" CodeBuild project
+    Default: pipedrive-automation-codebuild-deploy
+
+  DeployBuildSpecPath:
+    Type: String
+    Description: path to the CodeBuild "Deploy" stage buildspec file
+    Default: CodeBuild/deploy.yml
+
+  TestCodeBuildProjectName:
+    Type: String
+    Description: Name for "Test" CodeBuild project
+    Default: pipedrive-automation-codebuild-test
+
+  TestBuildSpecPath:
+    Type: String
+    Description: path to the CodeBuild "Test" stage buildspec file
+    Default: CodeBuild/deploy.yml
+
+  EnvType:
+    Type: String
+    AllowedValues:
+      - prod
+      - labs
+    Default: labs
+
+Resources:
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref ArtifactStoreBucket
+        Type: S3
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Name: pipedrive-automation
+      Stages:
+
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Repo: !Ref GitHubRepo
+                Owner: !Ref GitHubRepoOwner
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: Source
+              RunOrder: 1
+
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref DeployCodeBuildProject
+              InputArtifacts:
+                - Name: Source
+              OutputArtifacts:
+                - Name: Build
+              RunOrder: 3
+
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ArtifactStoreBucketName
+    DeletionPolicy: Delete
+
+  DeployCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: PipeDrive Automation build project
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        EnvironmentVariables:
+          - Name: S3_BUCKET_NAME
+            Value: !Ref ArtifactStoreBucketName
+            Type: PLAINTEXT
+          - Name: SNS_TOPIC_ARN
+            Value: !Ref 'AlertTopic'
+            Type: PLAINTEXT
+          - Name: ENVIRONMENT_TYPE
+            Value: !Ref 'EnvType'
+            Type: PLAINTEXT
+      Name: !Ref DeployCodeBuildProjectName
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref DeployBuildSpecPath
+      TimeoutInMinutes: 30
+
+  TestCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: PipeDrive Automation build project
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+        EnvironmentVariables:
+          - Name: S3_BUCKET_NAME
+            Value: !Ref ArtifactStoreBucketName
+            Type: PLAINTEXT
+          - Name: SNS_TOPIC_ARN
+            Value: !Ref 'AlertTopic'
+            Type: PLAINTEXT
+          - Name: ENVIRONMENT_TYPE
+            Value: !Ref 'EnvType'
+            Type: PLAINTEXT
+      Name: !Ref TestCodeBuildProjectName
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref TestBuildSpecPath
+      TimeoutInMinutes: 30
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - codebuild.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: code-build-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "codepipeline:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "cloudformation:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "iam:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "lambda:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "apigateway:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource: !Sub 'arn:aws:s3:::${ArtifactStoreBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - ssm:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "cloudfront:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "route53:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "sns:*"
+                  - "sqs:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "events:*"
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/doc-templates-hourly'
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - codepipeline.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: codepipeline-service
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - s3:*
+              Resource: !Sub 'arn:aws:s3:::${ArtifactStoreBucketName}/*'
+            - Effect: Allow
+              Action:
+                - codebuild:*
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: arn:aws:lambda:*:*:function:cfn-nag-pipeline
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: PipeDriveAutomationAlerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: greg.hoggard@stelligent.com
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+
+  EventRule:
+      Type: "AWS::Events::Rule"
+      Properties:
+        Description: "PipeDrive Automation pipeline failure notification"
+        EventPattern:
+          source:
+          - aws.codepipeline
+          resources:
+          - !Join [ ':', ['arn:aws:codepipeline', !Ref 'AWS::Region', !Ref 'AWS::AccountId', !Ref 'Pipeline'] ]
+          detail-type:
+          - CodePipeline Pipeline Execution State Change
+          detail:
+            state:
+            - FAILED
+        State: "ENABLED"
+        Targets:
+          -
+            Arn:
+              Ref: "AlertTopic"
+            Id: "OpsTopic"
+            InputTransformer:
+              InputTemplate: '"The Pipeline has failed. Go to https://console.aws.amazon.com/codepipeline/home?region=us-east-1#/view/" '
+              InputPathsMap:
+                pipeline: "$.detail.pipeline"
+
+Outputs:
+  CodePipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${Pipeline}/view?region=${AWS::Region}
+    Description: CodePipeline URL

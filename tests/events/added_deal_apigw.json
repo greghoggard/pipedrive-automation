@@ -1,0 +1,224 @@
+{
+   "resource": "/pipedrive",
+   "path": "/pipedrive",
+   "httpMethod": "POST",
+   "headers": {
+      "Accept": "application/json, text/plain, */*",
+      "CloudFront-Forwarded-Proto": "https",
+      "CloudFront-Is-Desktop-Viewer": "true",
+      "CloudFront-Is-Mobile-Viewer": "false",
+      "CloudFront-Is-SmartTV-Viewer": "false",
+      "CloudFront-Is-Tablet-Viewer": "false",
+      "CloudFront-Viewer-Country": "US",
+      "Content-Type": "application/json",
+      "Host": "uzt1voaqtk.execute-api.us-east-1.amazonaws.com",
+      "User-Agent": "Pipedrive Webhooks",
+      "Via": "1.1 528370c15fe8a3265e7e914f16e953c2.cloudfront.net (CloudFront)",
+      "X-Amz-Cf-Id": "wp79yfFwjM_ztLjIFgLB9wKZQvpSUoGnH6Qvt3_tLgkkzg5joxXVdQ==",
+      "X-Amzn-Trace-Id": "Root=1-5d823738-59801becc801866c669fb254",
+      "x-datadog-parent-id": "5652384004710616840",
+      "x-datadog-sampling-priority": "1",
+      "x-datadog-trace-id": "5612368928552550380",
+      "X-Forwarded-For": "161.47.139.4, 70.132.37.82",
+      "X-Forwarded-Port": "443",
+      "X-Forwarded-Proto": "https"
+   },
+   "multiValueHeaders": {
+      "Accept": [
+         "application/json, text/plain, */*"
+      ],
+      "CloudFront-Forwarded-Proto": [
+         "https"
+      ],
+      "CloudFront-Is-Desktop-Viewer": [
+         "true"
+      ],
+      "CloudFront-Is-Mobile-Viewer": [
+         "false"
+      ],
+      "CloudFront-Is-SmartTV-Viewer": [
+         "false"
+      ],
+      "CloudFront-Is-Tablet-Viewer": [
+         "false"
+      ],
+      "CloudFront-Viewer-Country": [
+         "US"
+      ],
+      "Content-Type": [
+         "application/json"
+      ],
+      "Host": [
+         "uzt1voaqtk.execute-api.us-east-1.amazonaws.com"
+      ],
+      "User-Agent": [
+         "Pipedrive Webhooks"
+      ],
+      "Via": [
+         "1.1 528370c15fe8a3265e7e914f16e953c2.cloudfront.net (CloudFront)"
+      ],
+      "X-Amz-Cf-Id": [
+         "wp79yfFwjM_ztLjIFgLB9wKZQvpSUoGnH6Qvt3_tLgkkzg5joxXVdQ=="
+      ],
+      "X-Amzn-Trace-Id": [
+         "Root=1-5d823738-59801becc801866c669fb254"
+      ],
+      "x-datadog-parent-id": [
+         "5652384004710616840"
+      ],
+      "x-datadog-sampling-priority": [
+         "1"
+      ],
+      "x-datadog-trace-id": [
+         "5612368928552550380"
+      ],
+      "X-Forwarded-For": [
+         "161.47.139.4, 70.132.37.82"
+      ],
+      "X-Forwarded-Port": [
+         "443"
+      ],
+      "X-Forwarded-Proto": [
+         "https"
+      ]
+   },
+   "queryStringParameters": null,
+   "multiValueQueryStringParameters": null,
+   "pathParameters": null,
+   "stageVariables": null,
+   "requestContext": {
+      "resourceId": "u9iu8l",
+      "resourcePath": "/pipedrive",
+      "httpMethod": "POST",
+      "extendedRequestId": "AN2QyGyzIAMFwEg=",
+      "requestTime": "18/Sep/2019:13:55:04 +0000",
+      "path": "/Prod/pipedrive",
+      "accountId": "324320755747",
+      "protocol": "HTTP/1.1",
+      "stage": "Prod",
+      "domainPrefix": "uzt1voaqtk",
+      "requestTimeEpoch": 1568814904141,
+      "requestId": "9bf602a5-fcfe-46cd-b8c1-d8bff92c0e11",
+      "identity": {
+         "cognitoIdentityPoolId": null,
+         "accountId": null,
+         "cognitoIdentityId": null,
+         "caller": null,
+         "sourceIp": "161.47.139.4",
+         "principalOrgId": null,
+         "accessKey": null,
+         "cognitoAuthenticationType": null,
+         "cognitoAuthenticationProvider": null,
+         "userArn": null,
+         "userAgent": "Pipedrive Webhooks",
+         "user": null
+      },
+      "domainName": "uzt1voaqtk.execute-api.us-east-1.amazonaws.com",
+      "apiId": "uzt1voaqtk"
+   },
+   "body": {
+      "v": 1,
+      "matches_filters": {
+         "current": []
+      },
+      "meta": {
+         "v": 1,
+         "action": "added",
+         "object": "deal",
+         "id": 33,
+         "company_id": 6849887,
+         "user_id": 10096522,
+         "host": "stelligent-labs.pipedrive.com",
+         "timestamp": 1568814903,
+         "timestamp_micro": 1568814903625349,
+         "permitted_user_ids": [
+            10096522,
+            9214697,
+            9354642,
+            9997840,
+            10510782
+         ],
+         "trans_pending": false,
+         "is_bulk_update": false,
+         "pipedrive_service_name": false,
+         "matches_filters": {
+            "current": []
+         },
+         "webhook_id": "91373"
+      },
+      "current": {
+         "id": 33,
+         "creator_user_id": 10096522,
+         "user_id": 10096522,
+         "person_id": 18,
+         "org_id": 433,
+         "stage_id": 1,
+         "title": "performance-testing",
+         "value": 234234,
+         "currency": "USD",
+         "add_time": "2019-09-18 13:55:03",
+         "update_time": "2019-09-18 13:55:03",
+         "stage_change_time": null,
+         "active": true,
+         "deleted": false,
+         "status": "open",
+         "probability": null,
+         "next_activity_date": null,
+         "next_activity_time": null,
+         "next_activity_id": null,
+         "last_activity_id": null,
+         "last_activity_date": null,
+         "lost_reason": null,
+         "visible_to": "3",
+         "close_time": null,
+         "pipeline_id": 1,
+         "won_time": null,
+         "first_won_time": null,
+         "lost_time": null,
+         "products_count": 0,
+         "files_count": 0,
+         "notes_count": 0,
+         "followers_count": 0,
+         "email_messages_count": 0,
+         "activities_count": 0,
+         "done_activities_count": 0,
+         "undone_activities_count": 0,
+         "reference_activities_count": 0,
+         "participants_count": 0,
+         "expected_close_date": null,
+         "last_incoming_mail_time": null,
+         "last_outgoing_mail_time": null,
+         "label": null,
+         "dc7bdcb1ee2a839889b303855b568dbf23336126": "9",
+         "d329fc0a994b66d9ceed509d395505f8dbb469f1": "2",
+         "5c66a8ba181d59148dcc64f14fbe66b2739c8675": "12",
+         "5cd6ba521799605a921543753c559fcd23b3b70d": null,
+         "b9eaf5d4d748d46119b700f0df8f71d37d8740f5": null,
+         "028849bd7b6bfac6b9c69706a25cec81410c096e": null,
+         "fe00a48f14d1b2299be94a819c6a492ea7707bbe": "13",
+         "94d49fe1f663fcddd1c08ff761b2d3da7018113a": null,
+         "8f3cae225f4160003c04b10f2084c75c700ae4cd": null,
+         "b3ac74b4fdba3bb5fe7277f0a75d17da65ee759b": "gci",
+         "stage_order_nr": 1,
+         "person_name": "Greg",
+         "org_name": "GregCo Inc",
+         "next_activity_subject": null,
+         "next_activity_type": null,
+         "next_activity_duration": null,
+         "next_activity_note": null,
+         "formatted_value": "$234,234",
+         "weighted_value": 234234,
+         "formatted_weighted_value": "$234,234",
+         "weighted_value_currency": "USD",
+         "rotten_time": null,
+         "owner_name": "Greg Hoggard",
+         "cc_email": "stelligent-labs+deal33@pipedrivemail.com",
+         "org_hidden": false,
+         "person_hidden": false
+      },
+      "previous": null,
+      "event": "added.deal",
+      "retry": 0
+   },
+   "isBase64Encoded": false
+}

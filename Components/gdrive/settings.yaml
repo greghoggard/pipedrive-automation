@@ -1,0 +1,4 @@
+client_config_backend: service
+service_config:
+  client_service_email: pipedrive-webhook@stelligent-labs-sales-magic.iam.gserviceaccount.com
+  client_pkcs12_file_path: key.pem

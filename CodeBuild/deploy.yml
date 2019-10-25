@@ -1,0 +1,22 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - pip install --user aws-sam-cli
+  pre_build:
+    commands:
+      - USER_BASE_PATH=$(python -m site --user-base)
+      - export PATH=$PATH:$USER_BASE_PATH/bin
+      - pip install -r requirements-dev.txt
+  build:
+    commands:
+      - aws --region=us-east-1 ssm get-parameter --name "/gdrive/labs/gdrive_auth" --with-decryption --output text --query Parameter.Value > Components/gdrive/key.pem
+      - python -m pytest tests/unit
+      - sam build
+      - sam package --template-file .aws-sam/build/template.yaml --s3-bucket $S3_BUCKET_NAME --output-template-file packaged-template.yaml
+      - sam deploy --stack-name pipedrive-services-stack --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --parameter-overrides "EnvType=$ENVIRONMENT_TYPE"
+  #post_build:
+    #commands:
+      #- python -m pytest tests/integration
